@@ -6,6 +6,7 @@ import sys
 import json
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from collections import deque
 from config import HOST, BASE_PORT, PEER_PORTS, BUFFER_SIZE, FORWARD_THRESHOLD, UPDATE_INTERVAL, REINFORCEMENT, DECAY_FACTOR, INITIAL_PHEROMONE
 from pheromone_table import PheromoneTable
 
@@ -152,23 +153,58 @@ def main():
 
     # Extension C: Logging & Visualization (Optional Matplotlib plot)
     if "--plot" in sys.argv:
-        # Start a simple plot to visualize pheromone evolution
-        fig, ax = plt.subplots()
-        ax.set_ylim(0, 5)
-        ax.set_title(f"Node {port} Pheromone Levels")
+        # Start a simple plot to visualize pheromone evolution over time
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"Node {port}: Pheromone Evolution Over Time")
+        ax.set_xlabel("Time (ticks)")
+        ax.set_ylabel("Pheromone Strength")
+        
+        # Keep track of history: { "T_N": deque([...]) }
+        MAX_HISTORY = 60
+        history = {}
+        time_data = deque(maxlen=MAX_HISTORY)
+        tick_counter = [0]
         
         def update_plot(frame):
             ax.clear()
             ax.set_ylim(0, 5)
-            ax.set_title(f"Node {port} Pheromone Levels")
+            ax.set_title(f"Node {port}: Pheromone Evolution Over Time")
+            ax.set_xlabel("Time (ticks)")
+            ax.set_ylabel("Pheromone Strength")
+            ax.axhline(y=FORWARD_THRESHOLD, color='r', linestyle='--', label='Threshold')
+            
             table = n.pheromones.get_all()
-            if table:
-                ax.bar([str(k) for k in table.keys()], list(table.values()), color='green')
-                ax.axhline(y=FORWARD_THRESHOLD, color='r', linestyle='--', label='Threshold')
-                ax.legend()
+            tick_counter[0] += 1
+            time_data.append(tick_counter[0])
+            
+            # Ensure all known paths have a deque
+            current_keys = set()
+            for target, peers in table.items():
+                for peer, val in peers.items():
+                    key = f"Target {target} via {peer}"
+                    current_keys.add(key)
+                    if key not in history:
+                        # Pad with zeros for previous ticks if it's a newly discovered path
+                        history[key] = deque([0] * (len(time_data) - 1), maxlen=MAX_HISTORY)
+                    history[key].append(val)
+                    
+            # Pad keys that disappeared (decayed below 0.01) with 0
+            for key in list(history.keys()): # Iterate over a copy to allow modification
+                if key not in current_keys:
+                    history[key].append(0)
+                    
+            # Plot the lines
+            has_data = False
+            for key, y_data in history.items():
+                # Only plot lines that actually existed or have current value > 0
+                if any(val > 0.01 for val in y_data): 
+                    ax.plot(time_data, y_data, marker='.', label=key)
+                    has_data = True
+                    
+            if has_data:
+                ax.legend(loc='upper right')
         
         ani = animation.FuncAnimation(fig, update_plot, interval=1000)
-        # Run plot in non-blocking mode (not strictly perfect CLI integration, but works for lab demo)
         plt.ion()
         plt.show(block=False)
 
