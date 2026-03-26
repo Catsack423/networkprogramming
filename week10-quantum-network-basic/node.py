@@ -23,6 +23,10 @@ class ConceptualQuantumNode:
             s.settimeout(2.0)
             s.connect((HOST, peer_port))
             
+            # Extension B: Multi-Hop Token Routing (Track history)
+            if self.port not in token.paths:
+                token.paths.append(self.port)
+            
             s.sendall(json.dumps(token.serialize()).encode())
             s.close()
             self.log(f"Transferred quantum token '{token.id}' to {peer_port}")
@@ -38,6 +42,8 @@ class ConceptualQuantumNode:
                 forwarded = False
                 for peer in PEER_PORTS:
                     if peer == self.port: continue
+                    # Extension B: Prevention of loop
+                    if peer in token.paths: continue
                     
                     if self.send_token(peer, token):
                         # No-Cloning: We MUST remove it locally
