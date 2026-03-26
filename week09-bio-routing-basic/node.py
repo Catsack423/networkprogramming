@@ -15,6 +15,7 @@ class BioNode:
         self.pheromones = PheromoneTable()
         self.queue = []
         self.running = True
+        self.is_congested = False # Extension A: Simulating node congestion
         
         # Extension A: Tracking round-trip latency to adjust reinforcement
         self.latency_stats = {} 
@@ -87,6 +88,10 @@ class BioNode:
                 if raw:
                     packet = json.loads(raw.decode())
                     
+                    if self.is_congested:
+                        self.log("Node is congested. Processing slowly...")
+                        time.sleep(1.0) # Artificial delay
+                    
                     if packet['target'] == self.port:
                         self.log(f"--- INBOX: From {packet['origin']} -> '{packet['msg']}' ---")
                         # ACK the message (helps with Extension A RTT calculation)
@@ -116,6 +121,9 @@ class BioNode:
                 for peer, val in self.pheromones.get_all().items():
                     print(f" Port {peer}: {val:.3f}")
                 print(f" Threshold: {FORWARD_THRESHOLD}")
+            elif action == "/congest":
+                self.is_congested = not self.is_congested
+                print(f"Congestion Simulation: {'ON' if self.is_congested else 'OFF'}")
             elif action == "/msg" and len(cmd) >= 3:
                 target = int(cmd[1])
                 body = cmd[2]

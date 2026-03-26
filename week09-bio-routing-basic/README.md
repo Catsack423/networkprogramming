@@ -6,7 +6,7 @@ This lab simulates **Ant-Colony Optimization** for network routing. Instead of h
 When a node successfully sends a message to a neighbor, it reinforces that path (adds pheromone). Over time, all paths naturally evaporate (decay). This creates a self-optimizing system where fast, reliable routes organically attract the most traffic.
 
 ### Extensions Included
-- **Extension A: Dynamic Learning**: Nodes track Round-Trip Time (RTT) of the ACK packet. Faster nodes get a higher pheromone bonus.
+- **Extension A: Dynamic Learning & Congestion**: Nodes track Round-Trip Time (RTT) of the ACK packet. Faster nodes get a higher pheromone bonus. You can type `/congest` on any node to artificially slow down its response time and watch the network naturally root around the congestion.
 - **Extension B: Multi-Hop**: If a node receives a packet meant for someone else, it stores it in a queue and uses its own pheromone table to forward it later.
 - **Extension C: Visualization**: Run the node with `--plot` to see a live Matplotlib bar chart of the pheromone tables evolving.
 
