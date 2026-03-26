@@ -12,6 +12,16 @@ class OpportunisticNode:
     def __init__(self, port):
         self.port = port
         self.store = MessageStore(f"store_{port}.json")
+        self.encounters = {} # Tracks how many times we've met a peer
+
+        # Extension C: Statistics
+        self.stats = {
+            "sync_attempts": 0,
+            "sync_successes": 0,
+            "messages_sent": 0,
+            "messages_received": 0
+        }
+        
         self.running = True
 
     def log(self, msg):
@@ -20,9 +30,14 @@ class OpportunisticNode:
     def sync_with_neighbor(self, neighbor_port):
         """Anti-entropy: Exchange inventories and sync missing data."""
         try:
+            self.stats["sync_attempts"] += 1
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(1.0)
             s.connect((HOST, neighbor_port))
+            
+            # Record successful encounter
+            self.encounters[neighbor_port] = self.encounters.get(neighbor_port, 0) + 1
+            self.stats["sync_successes"] += 1
             
             # 1. Send our inventory
             my_inv = self.store.get_inventory()
@@ -50,6 +65,7 @@ class OpportunisticNode:
                             "msg": {**msg, "copies_left": shared_copies}
                         }
                         s.sendall(json.dumps(data_packet).encode())
+                        self.stats["messages_sent"] += 1
                         # Note: In a real protocol, we'd wait for ACK before decrementing locally
                         self.store._save() 
             s.close()
@@ -83,6 +99,12 @@ class OpportunisticNode:
                         
                         # Now wait for them to send DATA if they have stuff for me
                         # (Simplification: In a real epidemic protocol, this is a 3-way handshake)
+                    elif req['type'] == 'DATA':
+                        # We received data from a neighbor who had higher copies
+                        msg = req['msg']
+                        if self.store.add(msg['id'], msg['body'], msg['origin'], msg['copies_left'], msg['ttl'], msg['hops']):
+                            self.stats["messages_received"] += 1
+                            self.log(f"Received new message from epidemic sync: '{msg['body']}'")
                 conn.close()
             except: continue
 
@@ -106,7 +128,7 @@ def main():
     threading.Thread(target=node.discovery_loop, daemon=True).start()
 
     print(f"--- Opportunistic Sync Node {port} Ready ---")
-    print("Commands: /msg <text>, /list, /exit")
+    print("Commands: /msg <text>, /list, /peers, /stats, /exit")
 
     try:
         while True:
@@ -121,6 +143,25 @@ def main():
                 print(f"Stored Messages: {len(inv)}")
                 for mid, m in inv.items():
                     print(f" - [{m['origin']}] '{m['body']}' (Copies: {m['copies_left']}, Hops: {m['hops']})")
+            elif cmd[0] == "/peers":
+                print("\n--- Peer Encounters ---")
+                if not node.encounters:
+                    print("No peers encountered yet.")
+                for peer, count in node.encounters.items():
+                    # Example probability calculation (can be more sophisticated)
+                    prob = min(0.1 + (count * 0.1), 1.0) 
+                    print(f" - Peer {peer}: {count} encounters (Sync Probability: {prob:.0%})")
+                print("-----------------------\n")
+            elif cmd[0] == "/stats":
+                print("\n--- Network Performance Stats ---")
+                print(f"Sync Attempts:    {node.stats['sync_attempts']}")
+                print(f"Sync Successes:   {node.stats['sync_successes']}")
+                if node.stats['sync_attempts'] > 0:
+                    success_rate = (node.stats['sync_successes'] / node.stats['sync_attempts']) * 100
+                    print(f"Sync Success Rate:{success_rate:.1f}%")
+                print(f"Messages Sent:    {node.stats['messages_sent']}")
+                print(f"Messages Rcvd:    {node.stats['messages_received']}")
+                print("---------------------------------\n")
             elif cmd[0] == "/msg" and len(cmd) > 1:
                 mid = f"{port}_{time.time()}"
                 node.store.add(mid, cmd[1], port, DEFAULT_MAX_COPIES, DEFAULT_TTL)
