@@ -54,11 +54,15 @@ class AdHocNode:
             
             self.log(f"Received from {addr[1]}: '{msg_text}' (TTL={ttl}, Origin={origin})")
 
-            # Extension A: Discovery on reception
+            # Extension A: Discovery on reception (if it's a PING or has sender info)
+            sender_port = payload.get('sender_port') or addr[1]
+            if payload.get('type') == 'PING':
+                sender_port = payload.get('sender_port')
+            
             with self.lock:
-                if addr[1] not in self.neighbor_table:
-                    self.neighbor_table.add(addr[1])
-                    self.log(f"New neighbor discovered: {addr[1]}")
+                if sender_port and sender_port != self.port and sender_port not in self.neighbor_table:
+                    self.neighbor_table.add(sender_port)
+                    self.log(f"New neighbor discovered: {sender_port}")
 
             # Probabilistic Forwarding
             if ttl > 0:
@@ -102,10 +106,9 @@ class AdHocNode:
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     s.settimeout(0.2)
                     s.connect((HOST, p))
-                    # Just a ping or a HELLO message
-                    hello = json.dumps({"type": "PING", "port": self.port})
-                    # This node doesn't handle PING specifically in handle_incoming yet,
-                    # but the connect itself confirms port is open.
+                    # Extension A: Send explicit HELLO/PING with our listening port
+                    ping = json.dumps({"type": "PING", "sender_port": self.port})
+                    s.sendall(ping.encode())
                     s.close()
                     with self.lock:
                         if p not in self.neighbor_table:
@@ -157,6 +160,7 @@ def main():
                 payload = {
                     "id": f"{port}_{time.time()}",
                     "origin": port,
+                    "sender_port": self.port, # Signal our port for discovery
                     "body": msg_body,
                     "ttl": DEFAULT_TTL
                 }
