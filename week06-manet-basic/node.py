@@ -116,14 +116,20 @@ class AdHocNode:
             time.sleep(DISCOVERY_INTERVAL)
 
     def mobility_simulation(self):
-        """Extension B: Randomly lose neighbors to simulate movement."""
+        """Extension B: Randomly lose/gain neighbors to simulate mobility."""
+        self.log("Mobility simulation active.")
         while self.running:
             time.sleep(MOBILITY_INTERVAL)
             with self.lock:
-                if self.neighbor_table and random.random() < 0.3:
+                if self.neighbor_table and random.random() < 0.4:
+                    # Simulation: Node moves out of range
                     lost = random.choice(list(self.neighbor_table))
                     self.neighbor_table.remove(lost)
-                    self.log(f"!! Mobility: Neighbor {lost} went out of range.")
+                    self.log(f"!! MOBILITY: Neighbor {lost} moved out of range.")
+                elif random.random() < 0.2:
+                    # Simulation: Node moves into range (discovery will handle this, 
+                    # but we log it for effect if a new one appears)
+                    self.log("?? MOBILITY: Searching for new signals...")
 
 def main():
     if len(sys.argv) < 2:
