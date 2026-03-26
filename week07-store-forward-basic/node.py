@@ -35,7 +35,8 @@ class StoreForwardNode:
             
             for msg in pending:
                 if now >= msg['next_retry']:
-                    self.log(f"Retrying message to {msg['peer']} (Attempt {msg['retries'] + 1})")
+                    p_label = "EMERGENCY" if msg['priority'] >= 10 else "NORMAL"
+                    self.log(f"[{p_label}] Retrying message to {msg['peer']} (Attempt {msg['retries'] + 1})")
                     if self.send_attempt(msg['peer'], msg['message']):
                         self.log(f"Success! Message delivered to {msg['peer']}")
                         self.queue.remove_message((msg['peer'], msg['timestamp']))
@@ -94,7 +95,8 @@ def main():
                 pending = node.queue.get_pending_messages()
                 print(f"Pending Messages: {len(pending)}")
                 for m in pending:
-                    print(f" - To {m['peer']}: '{m['message']}' (Priority: {m['priority']}, Next Retry in: {int(m['next_retry'] - time.time())}s)")
+                    p_label = "EMERGENCY" if m['priority'] >= 10 else "NORMAL"
+                    print(f" - [{p_label}] To {m['peer']}: '{m['message']}' (Priority: {m['priority']}, Next Retry in: {int(m['next_retry'] - time.time())}s)")
             elif cmd[0] == "/send" and len(cmd) >= 3:
                 target_port = int(cmd[1])
                 msg_text = " ".join(cmd[2:-1]) if cmd[-1].isdigit() else " ".join(cmd[2:])
