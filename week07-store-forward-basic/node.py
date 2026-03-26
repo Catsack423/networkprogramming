@@ -35,20 +35,20 @@ class StoreForwardNode:
             
             for msg in pending:
                 if now >= msg['next_retry']:
-                    self.log(f"Retrying message to {msg['peer']} (Attempt {msg['retries'] + 1})")
                     if self.send_attempt(msg['peer'], msg['message']):
-                        self.log(f"Success! Message delivered to {msg['peer']}")
+                        self.log(f"SUCCESS! Message delivered to {msg['peer']}")
                         self.queue.remove_message((msg['peer'], msg['timestamp']))
                     else:
-                        # Exponential backoff: retry_interval * (2 ^ retries)
+                        # Extension B: Exponential Backoff (2^retries up to MAX)
                         new_retries = msg['retries'] + 1
-                        backoff = min(RETRY_INTERVAL * (2 ** new_retries), MAX_RETRY_BACKOFF)
+                        backoff = min(RETRY_INTERVAL * (2 ** (new_retries - 1)), MAX_RETRY_BACKOFF)
+                        next_retry = now + backoff
                         self.queue.update_retry(
                             (msg['peer'], msg['timestamp']), 
-                            now + backoff, 
+                            next_retry, 
                             new_retries
                         )
-                        self.log(f"Failed. Backing off for {backoff}s")
+                        self.log(f"FAILED (Attempt {new_retries}). Next retry in {int(backoff)}s (at {time.strftime('%H:%M:%S', time.localtime(next_retry))})")
             
             time.sleep(1)
 
