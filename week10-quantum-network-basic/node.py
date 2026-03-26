@@ -13,6 +13,14 @@ class ConceptualQuantumNode:
         self.token_queue = [] # Tokens awaiting forwarding/reading
         self.running = True
 
+        # Extension C: Logging & Analytics
+        self.stats = {
+            "tokens_generated": 0,
+            "tokens_read": 0,
+            "tokens_forwarded": 0,
+            "tokens_collapsed": 0 
+        }
+
     def log(self, msg):
         print(f"[NODE {self.port}] {msg}")
 
@@ -26,6 +34,8 @@ class ConceptualQuantumNode:
             s.sendall(json.dumps(token.serialize()).encode())
             s.close()
             self.log(f"Transferred quantum token '{token.id}' to {peer_port}")
+            self.log(f"[STATE TRANSITION] Token '{token.id}' -> FORWARDED")
+            self.stats["tokens_forwarded"] += 1
             return True
         except:
             return False
@@ -33,6 +43,16 @@ class ConceptualQuantumNode:
     def forward_loop(self):
         """Routing loop ensuring tokens are only forwarded if they haven't collapsed."""
         while self.running:
+            # Extension A: Cleanup expired tokens
+            active_tokens = []
+            for token in self.token_queue:
+                if not token.peek_valid():
+                    self.log(f"[STATE TRANSITION] Token '{token.id}' collapsed due to expiry in queue. Invalidating.")
+                    self.stats["tokens_collapsed"] += 1
+                else:
+                    active_tokens.append(token)
+            self.token_queue = active_tokens
+
             # Attempt to forward valid tokens
             for token in self.token_queue[:]:
                 forwarded = False
@@ -71,8 +91,12 @@ class ConceptualQuantumNode:
                         message, status = token.read_token()
                         if message:
                             self.log(f"\n[SECURITY] Successfully un-collapsed state for '{token.id}': {message}")
+                            self.log(f"[STATE TRANSITION] Token '{token.id}' -> READ & COLLAPSED")
+                            self.stats["tokens_read"] += 1
                         else:
                             self.log(f"\n[SECURITY] Failed to read '{token.id}': {status}")
+                            self.log(f"[STATE TRANSITION] Token '{token.id}' -> ATTEMPTED READ ON COLLAPSED STATE")
+                            self.stats["tokens_collapsed"] += 1
                     else:
                         # Act as router
                         self.log(f"Received token state '{token.id}'. Storing for relay.")
@@ -89,16 +113,25 @@ class ConceptualQuantumNode:
             
             action = cmd[0].lower()
             if action == "/exit": self.running = False
+            elif action == "/stats":
+                print("\n--- Quantum Analytics (Message Collapse Visualization) ---")
+                for key, val in self.stats.items():
+                    bar = "█" * val
+                    print(f"{key.replace('_', ' ').title():<18}: {val:>3} | {bar}")
+                print("---------------------------------------------------------")
             elif action == "/queue":
                 print(f"Queue Size: {len(self.token_queue)}")
                 for t in self.token_queue:
                     print(f" - Token {t.id}")
             elif action == "/generate" and len(cmd) >= 2:
                 msg = cmd[1] if len(cmd) > 1 else "Empty State"
+                expiry = int(cmd[2]) if len(cmd) > 2 and cmd[2].isdigit() else 60 # Default expiry to 60 seconds
                 
-                t = QuantumToken(msg)
+                t = QuantumToken(msg, expiry_seconds=expiry)
                 self.token_queue.append(t)
-                print(f"Generated quantum token {t.id}. It is now in queue.")
+                self.stats["tokens_generated"] += 1
+                self.log(f"[STATE TRANSITION] Token '{t.id}' -> GENERATED")
+                print(f"Generated quantum token {t.id} (Expires in {expiry}s). It is now in queue.")
 
 def main():
     if len(sys.argv) < 2:
