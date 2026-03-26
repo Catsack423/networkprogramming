@@ -2,3 +2,4 @@
 HOST = "127.0.0.1"
 BASE_PORT = 9000
 BUFFER_SIZE = 1024
+MAX_PEERS = 10  # Range for manual discovery
