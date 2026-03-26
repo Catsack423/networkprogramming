@@ -19,10 +19,10 @@ class BioNode:
         # Extension A: Tracking round-trip latency to adjust reinforcement
         self.latency_stats = {} 
 
-        # Initialize base pheromones for known peers
+        # Initialize base pheromones for known peers (direct link = assume they are their own target)
         for peer in PEER_PORTS:
             if peer != self.port:
-                self.pheromones.reinforce(peer, INITIAL_PHEROMONE)
+                self.pheromones.reinforce(peer, peer, INITIAL_PHEROMONE)
 
     def log(self, msg):
         print(f"[NODE {self.port}] {msg}")
@@ -45,7 +45,8 @@ class BioNode:
                 # Faster responses get higher reinforcement
                 dynamic_bonus = max(0, 0.5 - rtt)
                 total_reinforcement = REINFORCEMENT + dynamic_bonus
-                self.pheromones.reinforce(peer_port, total_reinforcement)
+                # Extension B: target is stored in packet
+                self.pheromones.reinforce(packet['target'], peer_port, total_reinforcement)
                 return True
         except:
             pass
@@ -58,18 +59,28 @@ class BioNode:
             # 1. Decay all paths
             self.pheromones.decay()
             
-            # 2. Find paths with enough pheromone to be considered
-            candidates = self.pheromones.get_best_candidates(FORWARD_THRESHOLD)
-            
-            if candidates:
-                # 3. Opportunistically try to forward queued messages
-                for packet in self.queue[:]:
-                    for peer in candidates:
-                        if self.send_packet(peer, packet):
-                            # Success! Remove from local queue and break candidate loop
-                            self.queue.remove(packet)
-                            self.log(f"Delivered buffered message to {peer}")
-                            break
+            # 2. Opportunistically try to forward queued messages
+            for packet in self.queue[:]:
+                target = packet['target']
+                candidates = self.pheromones.get_best_candidates(target, FORWARD_THRESHOLD)
+                
+                # Simple fallback: if no known path, probe all known peers
+                if not candidates:
+                    candidates = [p for p in PEER_PORTS if p != self.port]
+                    
+                for peer in candidates:
+                    # Prevent routing loops
+                    if 'path' in packet and packet['path'] and packet['path'][-1] == peer:
+                        continue
+                        
+                    packet['path'] = packet.get('path', [])
+                    if self.port not in packet['path']:
+                        packet['path'].append(self.port)
+                        
+                    if self.send_packet(peer, packet):
+                        self.queue.remove(packet)
+                        self.log(f"Delivered buffered message to {peer} (Target: {target})")
+                        break
             
             time.sleep(UPDATE_INTERVAL)
 
@@ -112,9 +123,12 @@ class BioNode:
             action = cmd[0].lower()
             if action == "/exit": self.running = False
             elif action == "/table":
-                print("--- Pheromone Table ---")
-                for peer, val in self.pheromones.get_all().items():
-                    print(f" Port {peer}: {val:.3f}")
+                print("--- Pheromone Table (Target -> Peer) ---")
+                table = self.pheromones.get_all()
+                if not table: print(" Empty.")
+                for t, peers in table.items():
+                    for p, val in peers.items():
+                        print(f" Target {t} via {p}: {val:.3f}")
                 print(f" Threshold: {FORWARD_THRESHOLD}")
             elif action == "/msg" and len(cmd) >= 3:
                 target = int(cmd[1])
@@ -126,8 +140,13 @@ class BioNode:
                     "hops": 0
                 }
                 
-                # Immediate attempt logic: Pick best candidate
-                candidates = self.pheromones.get_best_candidates(FORWARD_THRESHOLD)
+                # Immediate attempt logic
+                candidates = self.pheromones.get_best_candidates(target, FORWARD_THRESHOLD)
+                
+                # Fallback to direct try if no path
+                if not candidates:
+                    candidates = [p for p in PEER_PORTS if p != self.port]
+                    
                 sent = False
                 for peer in candidates:
                     if self.send_packet(peer, packet):
@@ -162,8 +181,17 @@ def main():
             ax.set_ylim(0, 5)
             ax.set_title(f"Node {port} Pheromone Levels")
             table = n.pheromones.get_all()
-            if table:
-                ax.bar([str(k) for k in table.keys()], list(table.values()), color='green')
+            
+            # Flatten table for plotting
+            labels = []
+            values = []
+            for t, peers in table.items():
+                for p, val in peers.items():
+                    labels.append(f"T:{t}\nP:{p}")
+                    values.append(val)
+                    
+            if labels:
+                ax.bar(labels, values, color='green')
                 ax.axhline(y=FORWARD_THRESHOLD, color='r', linestyle='--', label='Threshold')
                 ax.legend()
         
