@@ -4,7 +4,7 @@ import threading
 import time
 import sys
 import json
-from config import HOST, BASE_PORT, PEER_PORTS, BUFFER_SIZE, UPDATE_INTERVAL
+from config import HOST, BASE_PORT, PEER_PORTS, BUFFER_SIZE, UPDATE_INTERVAL, TOKEN_EXPIRY_DEFAULT
 from token import QuantumToken
 
 class ConceptualQuantumNode:
@@ -33,6 +33,15 @@ class ConceptualQuantumNode:
     def forward_loop(self):
         """Routing loop ensuring tokens are only forwarded if they haven't collapsed."""
         while self.running:
+            # Extension A: Cleanup expired tokens
+            active_tokens = []
+            for token in self.token_queue:
+                if not token.peek_valid():
+                    self.log(f"Token '{token.id}' collapsed due to expiry in queue. Invalidating.")
+                else:
+                    active_tokens.append(token)
+            self.token_queue = active_tokens
+
             # Attempt to forward valid tokens
             for token in self.token_queue[:]:
                 forwarded = False
@@ -92,13 +101,14 @@ class ConceptualQuantumNode:
             elif action == "/queue":
                 print(f"Queue Size: {len(self.token_queue)}")
                 for t in self.token_queue:
-                    print(f" - Token {t.id}")
+                    print(f" - Token {t.id} | Valid: {t.peek_valid()}")
             elif action == "/generate" and len(cmd) >= 2:
                 msg = cmd[1] if len(cmd) > 1 else "Empty State"
+                expiry = int(cmd[2]) if len(cmd) > 2 else TOKEN_EXPIRY_DEFAULT
                 
-                t = QuantumToken(msg)
+                t = QuantumToken(msg, expiry_seconds=expiry)
                 self.token_queue.append(t)
-                print(f"Generated quantum token {t.id}. It is now in queue.")
+                print(f"Generated quantum token {t.id} (Expires in {expiry}s). It is now in queue.")
 
 def main():
     if len(sys.argv) < 2:
