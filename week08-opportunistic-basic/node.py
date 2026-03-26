@@ -38,7 +38,7 @@ class OpportunisticNode:
                 # They sent us what they need from us
                 needed_ids = response['needed']
                 for mid in needed_ids:
-                    msg = self.store.get_message(mid)
+                    msg = self.store.get_message(mid) # Use the store's get_message or the new one if it was in OpportunisticNode
                     if msg and msg['copies_left'] > 1:
                         # Spray-and-Wait: Give half of our copies to the neighbor
                         shared_copies = msg['copies_left'] // 2
@@ -117,14 +117,25 @@ def main():
                 node.running = False
                 break
             elif cmd[0] == "/list":
-                inv = node.store.messages
-                print(f"Stored Messages: {len(inv)}")
-                for mid, m in inv.items():
-                    print(f" - [{m['origin']}] '{m['body']}' (Copies: {m['copies_left']}, Hops: {m['hops']})")
+                # Active purge of expired messages for display
+                now = time.time()
+                alive_msgs = {k: v for k, v in node.store.messages.items() if now - v['timestamp'] < v['ttl']}
+                node.store.messages = alive_msgs
+                node.store._save()
+                
+                print(f"Stored Messages: {len(alive_msgs)}")
+                for mid, m in alive_msgs.items():
+                    time_left = int(m['ttl'] - (now - m['timestamp']))
+                    print(f" - [{m['origin']}] '{m['body']}' (Copies: {m['copies_left']}, TTL: {time_left}s left)")
+            elif cmd[0] == "/peers":
+                print(f"Encounter History:")
+                for peer, count in node.encounters.items():
+                    prob = min(0.1 + (count * 0.1), 1.0)
+                    print(f" - Peer {peer}: {count} encounters (Sync Probability: {prob:.0%})")
             elif cmd[0] == "/msg" and len(cmd) > 1:
                 mid = f"{port}_{time.time()}"
                 node.store.add(mid, cmd[1], port, DEFAULT_MAX_COPIES, DEFAULT_TTL)
-                print("Message created. Will diffuse opportunistically.")
+                print(f"Message created (TTL: {DEFAULT_TTL}s). Will diffuse opportunistically.")
     except KeyboardInterrupt:
         pass
 
