@@ -1,21 +1,30 @@
 # week04-udp-multicast-basic/sender.py
 import socket
-from config import MULTICAST_GROUP, PORT, TTL
+import sys
+import time
+from config import CHANNELS, PORT, TTL
 
-# Create a UDP socket
-# Note: IPPROTO_UDP is explicit here
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python sender.py <channel_name> [message]")
+        print(f"Channels: {', '.join(CHANNELS.keys())}")
+        return
 
-# Set the Time-to-Live (TTL) for the multicast packets
-# TTL=1 means the packet won't leave the local network
-sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, TTL)
+    name = sys.argv[1].lower()
+    if name not in CHANNELS:
+        print(f"Error: Unknown channel '{name}'")
+        return
 
-message = "MULTICAST: Hello subscribers! This is a group announcement."
+    group = CHANNELS[name]
+    message = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else f"Update on {name} at {time.strftime('%H:%M:%S')}"
 
-print(f"[SENDER] Sending to {MULTICAST_GROUP}:{PORT} (TTL={TTL})")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, TTL)
 
-try:
-    sock.sendto(message.encode(), (MULTICAST_GROUP, PORT))
-    print("[SENDER] Multicast message sent successfully.")
-finally:
+    print(f"[SENDER] Sending to {name} ({group}:{PORT})")
+    sock.sendto(message.encode(), (group, PORT))
+    print("[SENDER] Sent.")
     sock.close()
+
+if __name__ == "__main__":
+    main()
