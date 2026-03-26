@@ -14,6 +14,8 @@ class AdHocNode:
         self.msg_history = set() # To prevent loops
         self.received_count = 0
         self.forwarded_count = 0
+        self.duplicate_count = 0
+        self.forward_prob = FORWARD_PROBABILITY
         self.lock = threading.Lock()
         self.running = True
 
@@ -40,13 +42,17 @@ class AdHocNode:
     def handle_incoming(self, raw_data, addr):
         try:
             payload = json.loads(raw_data.decode())
-            msg_id = payload['id']
-            msg_text = payload['body']
-            ttl = payload['ttl']
-            origin = payload['origin']
+            msg_id = payload.get('id')
+            
+            if not msg_id: return
 
             if msg_id in self.msg_history:
-                return # Already seen
+                with self.lock: self.duplicate_count += 1
+                return 
+
+            msg_text = payload.get('body', '')
+            ttl = payload.get('ttl', 0)
+            origin = payload.get('origin', 'unknown')
 
             with self.lock:
                 self.msg_history.add(msg_id)
@@ -54,21 +60,23 @@ class AdHocNode:
             
             self.log(f"Received from {addr[1]}: '{msg_text}' (TTL={ttl}, Origin={origin})")
 
-            # Extension A: Discovery on reception
-            with self.lock:
-                if addr[1] not in self.neighbor_table:
-                    self.neighbor_table.add(addr[1])
-                    self.log(f"New neighbor discovered: {addr[1]}")
+            # Discovery logic...
+            sender_port = payload.get('sender_port')
+            if sender_port and sender_port != self.port:
+                with self.lock:
+                    if sender_port not in self.neighbor_table:
+                        self.neighbor_table.add(sender_port)
+                        self.log(f"New neighbor discovered: {sender_port}")
 
-            # Probabilistic Forwarding
             if ttl > 0:
-                if random.random() < FORWARD_PROBABILITY:
-                    self.log(f"Probability check passed. Forwarding...")
+                with self.lock: current_prob = self.forward_prob
+                if random.random() < current_prob:
+                    self.log(f"Forward check passed ({current_prob:.2f}). Forwarding...")
                     self.forwarded_count += 1
                     payload['ttl'] = ttl - 1
                     self.broadcast_to_neighbors(payload, exclude_port=addr[1])
                 else:
-                    self.log("Probability check failed. Dropping packet.")
+                    self.log(f"Forward check failed ({current_prob:.2f}). Dropping.")
 
         except Exception as e:
             self.log(f"Error handling message: {e}")
@@ -125,6 +133,27 @@ class AdHocNode:
                     self.neighbor_table.remove(lost)
                     self.log(f"!! Mobility: Neighbor {lost} went out of range.")
 
+    def monitor_metrics(self):
+        """Extension C: Adjust forward probability based on duplicate rate."""
+        while self.running:
+            time.sleep(10)
+            with self.lock:
+                # If we see many duplicates, it means the network is saturated
+                # If we see very few, we might need to be more aggressive
+                if self.received_count > 0:
+                    dup_rate = self.duplicate_count / (self.received_count + self.duplicate_count)
+                    
+                    if dup_rate > 0.5: # Highly saturated
+                        self.forward_prob = max(0.1, self.forward_prob - 0.1)
+                        self.log(f"!! METRICS: Saturation high ({dup_rate:.1%}). Reducing Prob to {self.forward_prob:.2f}")
+                    elif dup_rate < 0.1: # Potential under-delivery
+                        self.forward_prob = min(0.9, self.forward_prob + 0.1)
+                        self.log(f"!! METRICS: Saturation low ({dup_rate:.1%}). Increasing Prob to {self.forward_prob:.2f}")
+                    
+                    # Reset window
+                    self.duplicate_count = 0
+                    self.received_count = 0
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python node.py <port>")
@@ -136,6 +165,7 @@ def main():
     threading.Thread(target=node.start_server, daemon=True).start()
     threading.Thread(target=node.neighbor_discovery, daemon=True).start()
     threading.Thread(target=node.mobility_simulation, daemon=True).start()
+    threading.Thread(target=node.monitor_metrics, daemon=True).start()
 
     print(f"--- MANET Node {port} Ready ---")
     print("Commands: /send <msg>, /peers, /stats, /exit")
@@ -151,12 +181,14 @@ def main():
             elif cmd == "/peers":
                 print(f"Neighbors: {list(node.neighbor_table)}")
             elif cmd == "/stats":
-                print(f"Received: {node.received_count}, Forwarded: {node.forwarded_count}")
+                with node.lock:
+                    print(f"Prob: {node.forward_prob:.2f}, Received(Unique): {len(node.msg_history)}")
             elif cmd.startswith("/send"):
                 msg_body = cmd[6:]
                 payload = {
                     "id": f"{port}_{time.time()}",
                     "origin": port,
+                    "sender_port": port,
                     "body": msg_body,
                     "ttl": DEFAULT_TTL
                 }
